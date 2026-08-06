@@ -1,0 +1,2237 @@
+package com.bencodez.votingplugin;
+
+import com.bencodez.advancedcore.AdvancedCorePlugin;
+import com.bencodez.advancedcore.api.command.CommandHandler;
+import com.bencodez.advancedcore.api.inventory.editgui.EditGUIButton;
+import com.bencodez.advancedcore.api.inventory.editgui.valuetypes.EditGUIValueNumber;
+import com.bencodez.advancedcore.api.item.ItemBuilder;
+import com.bencodez.advancedcore.api.javascript.JavascriptPlaceholderRequest;
+import com.bencodez.advancedcore.api.messages.PlaceholderUtils;
+import com.bencodez.advancedcore.api.rewards.*;
+import com.bencodez.advancedcore.api.rewards.injected.RewardInject;
+import com.bencodez.advancedcore.api.rewards.injected.RewardInjectConfigurationSection;
+import com.bencodez.advancedcore.api.rewards.injected.RewardInjectInt;
+import com.bencodez.advancedcore.api.rewards.injected.RewardInjectValidator;
+import com.bencodez.advancedcore.api.rewards.injectedrequirement.RequirementInjectConfigurationSection;
+import com.bencodez.advancedcore.api.user.AdvancedCoreUser;
+import com.bencodez.advancedcore.api.user.UserDataFetchMode;
+import com.bencodez.advancedcore.api.user.UserStartup;
+import com.bencodez.simpleapi.file.YMLConfig;
+import com.bencodez.simpleapi.skull.SkullCache;
+import com.bencodez.simpleapi.sql.mysql.config.MysqlConfigSpigot;
+import com.bencodez.simpleapi.time.ParsedDuration;
+import com.bencodez.simpleapi.updater.Updater;
+import com.bencodez.votingplugin.broadcast.BroadcastHandler;
+import com.bencodez.votingplugin.broadcast.BroadcastSettings;
+import com.bencodez.votingplugin.commands.CommandLoader;
+import com.bencodez.votingplugin.commands.executers.CommandAdminVote;
+import com.bencodez.votingplugin.commands.executers.CommandVote;
+import com.bencodez.votingplugin.commands.gui.AdminGUI;
+import com.bencodez.votingplugin.commands.tabcompleter.AdminVoteTabCompleter;
+import com.bencodez.votingplugin.commands.tabcompleter.AliasCommandFilterListener;
+import com.bencodez.votingplugin.commands.tabcompleter.VoteTabCompleter;
+import com.bencodez.votingplugin.config.*;
+import com.bencodez.votingplugin.cooldown.CoolDownCheck;
+import com.bencodez.votingplugin.data.ServerData;
+import com.bencodez.votingplugin.discord.DiscordHandler;
+import com.bencodez.votingplugin.listeners.*;
+import com.bencodez.votingplugin.placeholders.MVdWPlaceholders;
+import com.bencodez.votingplugin.placeholders.PlaceHolders;
+import com.bencodez.votingplugin.placeholders.VotingPluginExpansion;
+import com.bencodez.votingplugin.presets.VoteSitePresetSetupHandler;
+import com.bencodez.votingplugin.servicesites.ServiceSiteHandler;
+import com.bencodez.votingplugin.signs.Signs;
+import com.bencodez.votingplugin.specialrewards.NameMCLikeCheckerTask;
+import com.bencodez.votingplugin.specialrewards.SpecialRewards;
+import com.bencodez.votingplugin.specialrewards.votemilestones.VoteMilestonesManager;
+import com.bencodez.votingplugin.specialrewards.voteparty.VoteParty;
+import com.bencodez.votingplugin.specialrewards.votestreak.VoteStreakHandler;
+import com.bencodez.votingplugin.test.VoteTester;
+import com.bencodez.votingplugin.timequeue.TimeQueueHandler;
+import com.bencodez.votingplugin.topvoter.TopVoter;
+import com.bencodez.votingplugin.topvoter.TopVoterHandler;
+import com.bencodez.votingplugin.topvoter.TopVoterPlayer;
+import com.bencodez.votingplugin.updater.CheckUpdate;
+import com.bencodez.votingplugin.user.UserManager;
+import com.bencodez.votingplugin.user.VotingPluginUser;
+import com.bencodez.votingplugin.votelog.VoteLogMysqlTable;
+import com.bencodez.votingplugin.votelog.listeners.PlayerPostVoteLoggerListener;
+import com.bencodez.votingplugin.votelog.listeners.PlayerSpecialRewardLoggerListener;
+import com.bencodez.votingplugin.votelog.listeners.VoteMilestoneVoteLogListener;
+import com.bencodez.votingplugin.votelog.listeners.VoteShopPurchaseLoggerListener;
+import com.bencodez.votingplugin.votereminding.VoteRemindersLegacyMigrator;
+import com.bencodez.votingplugin.votereminding.VoteRemindersListener;
+import com.bencodez.votingplugin.votereminding.VoteRemindersManager;
+import com.bencodez.votingplugin.votereminding.store.UserDataVoteReminderCooldownStore;
+import com.bencodez.votingplugin.voteshop.VoteShopManager;
+import com.bencodez.votingplugin.votesites.VoteSite;
+import com.bencodez.votingplugin.votesites.VoteSiteManager;
+import com.bencodez.votingplugin.webhook.VotingPluginWebhooks;
+import com.bencodez.votingplugin.webhook.WebhookRewardEntry;
+import com.bencodez.votingplugin.webhook.WebhookRewardParser;
+import lombok.Getter;
+import lombok.Setter;
+import org.bukkit.Bukkit;
+import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
+import org.bukkit.command.CommandMap;
+import org.bukkit.command.PluginCommand;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
+import org.bukkit.event.HandlerList;
+import org.bukkit.permissions.Permission;
+import org.bukkit.permissions.PermissionDefault;
+import org.bukkit.plugin.PluginManager;
+
+import java.io.File;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.lang.reflect.Field;
+import java.net.URL;
+import java.security.CodeSource;
+import java.time.*;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+/**
+ * The Class Main.
+ */
+public class VotingPluginMain extends AdvancedCorePlugin {
+
+	@Getter
+	public static VotingPluginMain plugin;
+
+	@Getter
+	@Setter
+	private ArrayList<CommandHandler> adminVoteCommand;
+
+	@Getter
+	private LinkedHashMap<java.util.UUID, ArrayList<String>> advancedTab = new LinkedHashMap<>();
+
+	@Getter
+	private BroadcastHandler broadcastHandler;
+
+	@Getter
+	private BungeeHandler bungeeHandler;
+
+	@Getter
+	private BungeeSettings bungeeSettings;
+
+	@Getter
+	private CheckUpdate checkUpdate;
+
+	@Getter
+	private CommandLoader commandLoader;
+
+	private PluginCommand registeredVoteCommand;
+
+	@Getter
+	private NameMCLikeCheckerTask nameMCLikeCheckerTask;
+
+	@Getter
+	private Config configFile;
+
+	@Getter
+	private ConfigVoteSites configVoteSites;
+
+	@Getter
+	private CoolDownCheck coolDownCheck;
+
+	@Getter
+	private GUI gui;
+
+	@Getter
+	private ShopFile shopFile;
+
+	@Getter
+	private LinkedHashMap<TopVoterPlayer, Integer> lastMonthTopVoter;
+
+	@Getter
+	@Setter
+	private LinkedHashMap<YearMonth, LinkedHashMap<TopVoterPlayer, Integer>> previousMonthsTopVoters;
+
+	@Getter
+	private MVdWPlaceholders mvdwPlaceholders;
+
+	@Getter
+	private PlaceHolders placeholders;
+
+	@Getter
+	private VoteTester voteTester;
+
+	@Getter
+	private String profile = "";
+
+	@Getter
+	private String buildNumber = "NOTSET";
+
+	@Getter
+	private ServerData serverData;
+
+	@Getter
+	@Setter
+	private Signs signs;
+
+	@Getter
+	private SpecialRewards specialRewards;
+
+	@Getter
+	private SpecialRewardsConfig specialRewardsConfig;
+
+	@Getter
+	private String time = "";
+
+	@Getter
+	@Setter
+	private LinkedHashMap<TopVoter, LinkedHashMap<TopVoterPlayer, Integer>> topVoter;
+
+	@Getter
+	private TopVoterHandler topVoterHandler;
+
+	@Getter
+	@Setter
+	private boolean update = false;
+
+	@Getter
+	@Setter
+	private Updater updater;
+
+	@Getter
+	private boolean updateStarted = false;
+
+	@Getter
+	@Setter
+	private VoteShopManager voteShopManager;
+
+	@Getter
+	@Setter
+	private ArrayList<CommandHandler> voteCommand;
+
+	@Getter
+	private VoteParty voteParty;
+
+	@Getter
+	private VoteRemindersManager voteRemindersManager;
+
+	@Getter
+	private VoteSiteManager voteSiteManager;
+
+	@Getter
+	@Setter
+	private LinkedHashMap<TopVoterPlayer, HashMap<VoteSite, LocalDateTime>> voteToday;
+
+	private boolean votifierLoaded = true;
+
+	@Getter
+	private boolean ymlError = false;
+
+	@Getter
+	private ScheduledExecutorService voteTimer;
+
+	@Getter
+	private UserManager votingPluginUserManager;
+
+	@Getter
+	private TimeQueueHandler timeQueueHandler;
+
+	@Getter
+	private ServiceSiteHandler serviceSiteHandler;
+
+	@Getter
+	private long lastBackgroundTaskTimeTaken = -1;
+
+	private boolean firstTimeLoaded = false;
+
+	@Getter
+	@Setter
+	private VoteSitePresetSetupHandler presetHandler;
+
+	@Getter
+	private DiscordHandler discordHandler;
+
+	public void addDirectlyDefinedRewards(DirectlyDefinedReward directlyDefinedReward) {
+		getRewardHandler().addDirectlyDefined(directlyDefinedReward);
+	}
+
+	public void basicBungeeUpdate() {
+		for (Player player : Bukkit.getOnlinePlayers()) {
+			VotingPluginUser user = getVotingPluginUserManager().getVotingPluginUser(player);
+			user.cache();
+			user.offVote();
+			user.checkOfflineRewards();
+		}
+	}
+
+	public void checkFirstTimeLoaded() {
+		if (!firstTimeLoaded) {
+
+			if (getGui().isChestVoteTopUseSkull()) {
+				int maxToLoad = 200;
+				for (TopVoter top : topVoter.keySet()) {
+					int num = 1;
+					Set<TopVoterPlayer> players = topVoter.get(top).keySet();
+					for (TopVoterPlayer p : players) {
+						if (num <= maxToLoad) {
+							getSkullCacheHandler().addToCache(p.getUuid(), p.getPlayerName());
+						}
+						num++;
+					}
+				}
+			}
+		}
+		firstTimeLoaded = true;
+	}
+
+	/**
+	 * Check votifier.
+	 */
+	private void checkVotifier() {
+		try {
+			Class.forName("com.vexsoftware.votifier.model.VotifierEvent");
+		} catch (ClassNotFoundException e) {
+			if (!bungeeSettings.isUseBungeecoord()) {
+				plugin.getLogger()
+						.warning("No VotifierEvent found, install Votifier, NuVotifier, or another Votifier plugin");
+			} else {
+				plugin.debug("No VotifierEvent found, but usebungeecoord enabled");
+			}
+			votifierLoaded = false;
+		}
+	}
+
+	private void checkYMLError() {
+		if (configFile.isFailedToRead() || configVoteSites.isFailedToRead() || specialRewardsConfig.isFailedToRead()
+				|| bungeeSettings.isFailedToRead() || gui.isFailedToRead()) {
+			ymlError = true;
+		} else {
+			ymlError = false;
+		}
+
+		if (ymlError) {
+			plugin.getBukkitScheduler().runTaskLaterAsynchronously(plugin, new Runnable() {
+
+				@Override
+				public void run() {
+					plugin.getLogger().severe("Failed to load a file, check startup log");
+				}
+			}, 1);
+		}
+	}
+
+	public void loadVoteShopManager() {
+		voteShopManager = new VoteShopManager(this);
+	}
+
+	public ArrayList<TopVoterPlayer> convertSet(Set<TopVoterPlayer> set) {
+		return new ArrayList<>(set);
+	}
+
+	@Override
+	public FileConfiguration getConfig() {
+		return configFile.getData();
+	}
+
+	public LinkedHashMap<TopVoterPlayer, Integer> getTopVoter(TopVoter top) {
+		LinkedHashMap<TopVoterPlayer, Integer> top1 = topVoter.get(top);
+		if (top1 == null) {
+			top1 = new LinkedHashMap<>();
+		}
+		return top1;
+	}
+
+	/**
+	 * Gets the user.
+	 *
+	 * @param uuid the uuid
+	 * @return the user
+	 */
+	@Deprecated
+	public VotingPluginUser getUser(UUID uuid) {
+		return getVotingPluginUserManager().getVotingPluginUser(uuid);
+	}
+
+	private YamlConfiguration getVersionFile() {
+		try {
+			CodeSource src = this.getClass().getProtectionDomain().getCodeSource();
+			if (src != null) {
+				URL jar = src.getLocation();
+				ZipInputStream zip = null;
+				zip = new ZipInputStream(jar.openStream());
+				while (true) {
+					ZipEntry e = zip.getNextEntry();
+					if (e != null) {
+						String name = e.getName();
+						if (name.equals("votingpluginversion.yml")) {
+							Reader defConfigStream = new InputStreamReader(zip);
+							if (defConfigStream != null) {
+								YamlConfiguration defConfig = YamlConfiguration.loadConfiguration(defConfigStream);
+								defConfigStream.close();
+								return defConfig;
+							}
+						}
+					}
+				}
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		return null;
+	}
+
+	@Deprecated
+	public VoteSite getVoteSite(String site, boolean checkEnabled) {
+		return voteSiteManager.getVoteSite(site, checkEnabled);
+	}
+
+	@Deprecated
+	public String getVoteSiteName(boolean checkEnabled, String... urls) {
+		return voteSiteManager.getVoteSiteName(checkEnabled, urls);
+	}
+
+	@Deprecated
+	public ArrayList<VoteSite> getVoteSitesEnabled() {
+		return voteSiteManager.getVoteSitesEnabled();
+	}
+
+	@Deprecated
+	public String getVoteSiteServiceSite(String name) {
+		return voteSiteManager.getVoteSiteServiceSite(name);
+	}
+
+	@Deprecated
+	public boolean hasVoteSite(String site) {
+		return voteSiteManager.hasVoteSite(site);
+	}
+
+	@Deprecated
+	public boolean isVoteSite(String voteSite) {
+		return voteSiteManager.isVoteSite(voteSite);
+	}
+
+	private void loadBungeeHandler() {
+		bungeeHandler = new BungeeHandler(this);
+		bungeeHandler.load();
+
+		if (getOptions().getServer().equalsIgnoreCase("PleaseSet")) {
+			getLogger().warning("Bungeecoord is true and server name is not set, bungeecoord features may not work");
+		}
+	}
+
+	@Getter
+	private VoteStreakHandler voteStreakHandler;
+
+	/**
+	 * Registers a directly editable rewards path from SpecialRewards.yml.
+	 *
+	 * @param rewardPath full configuration path to the rewards section
+	 */
+	private void addSpecialRewardsEditorPath(String rewardPath) {
+		addDirectlyDefinedRewards(new DirectlyDefinedReward(rewardPath) {
+
+			@Override
+			public void setData(String path, Object value) {
+				plugin.getSpecialRewardsConfig().getData().set(path, value);
+			}
+
+			@Override
+			public void createSection(String key) {
+				plugin.getSpecialRewardsConfig().getData().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return plugin.getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				plugin.getSpecialRewardsConfig().saveData();
+			}
+		});
+	}
+
+	public void loadDirectlyDefined() {
+		getRewardHandler().getDirectlyDefinedRewards().clear();
+
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("VoteReminderOptions.Defaults.Rewards") {
+
+			@Override
+			public void createSection(String key) {
+				getConfigFile().saveData();
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getConfigFile().getData();
+			}
+
+			@Override
+			public void save() {
+				getConfigFile().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getConfigFile().setValue(path, value);
+			}
+		});
+
+		ConfigurationSection sec = getConfigFile().getData().getConfigurationSection("VoteReminders");
+
+		if (sec != null) {
+			for (String key : sec.getKeys(false)) {
+				addDirectlyDefinedRewards(new DirectlyDefinedReward("VoteReminders." + key + ".Rewards") {
+
+					@Override
+					public void createSection(String key) {
+						getConfigFile().saveData();
+					}
+
+					@Override
+					public ConfigurationSection getFileData() {
+						return getConfigFile().getData();
+					}
+
+					@Override
+					public void save() {
+						getConfigFile().saveData();
+					}
+
+					@Override
+					public void setData(String path, Object value) {
+						getConfigFile().setValue(path, value);
+					}
+				});
+			}
+		}
+
+		// vote cooldown ended
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("VoteCoolDownEndedReward") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		// any site rewards
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("AnySiteRewards") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("EverySiteReward") {
+
+			@Override
+			public void createSection(String key) {
+				getConfigVoteSites().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getConfigVoteSites().getData();
+			}
+
+			@Override
+			public void save() {
+				getConfigVoteSites().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getConfigVoteSites().setValue(path, value);
+			}
+		});
+
+		// login rewards
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("LoginRewards") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		// logout rewards
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("LogoutRewards") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		// VoteParty
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("VoteParty.Rewards") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		// legacy reward handlng for migrator
+		if (getSpecialRewardsConfig().getData().getConfigurationSection("Cumulative") != null) {
+			for (String num : getSpecialRewardsConfig().getData().getConfigurationSection("Cumulative")
+					.getKeys(false)) {
+				addDirectlyDefinedRewards(new DirectlyDefinedReward("Cumulative." + num + ".Rewards") {
+
+					@Override
+					public void createSection(String key) {
+						getSpecialRewardsConfig().createSection(key);
+					}
+
+					@Override
+					public ConfigurationSection getFileData() {
+						return getSpecialRewardsConfig().getData();
+					}
+
+					@Override
+					public void save() {
+						getSpecialRewardsConfig().saveData();
+					}
+
+					@Override
+					public void setData(String path, Object value) {
+						getSpecialRewardsConfig().setValue(path, value);
+					}
+				});
+			}
+		}
+
+		if (getSpecialRewardsConfig().getData().getConfigurationSection("Milestones") != null) {
+			for (String num : getSpecialRewardsConfig().getData().getConfigurationSection("Milestones")
+					.getKeys(false)) {
+				addDirectlyDefinedRewards(new DirectlyDefinedReward("Milestones." + num + ".Rewards") {
+
+					@Override
+					public void createSection(String key) {
+						getSpecialRewardsConfig().createSection(key);
+					}
+
+					@Override
+					public ConfigurationSection getFileData() {
+						return getSpecialRewardsConfig().getData();
+					}
+
+					@Override
+					public void save() {
+						getSpecialRewardsConfig().saveData();
+					}
+
+					@Override
+					public void setData(String path, Object value) {
+						getSpecialRewardsConfig().setValue(path, value);
+					}
+				});
+			}
+		}
+
+		// legacy for migrator
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("AllSites") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		// legacy for migrator
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("AlmostAllSites") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		// legacy for migrator
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("FirstVote") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		// legacy for migrator
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("FirstVoteToday") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		// VoteSites
+		for (VoteSite site : plugin.getVoteSiteManager().getVoteSites()) {
+			addDirectlyDefinedRewards(new DirectlyDefinedReward("VoteSites." + site.getKey() + ".Rewards") {
+
+				@Override
+				public void createSection(String key) {
+					getConfigVoteSites().createSection(key);
+				}
+
+				@Override
+				public ConfigurationSection getFileData() {
+					return getConfigVoteSites().getData();
+				}
+
+				@Override
+				public void save() {
+					getConfigVoteSites().saveData();
+				}
+
+				@Override
+				public void setData(String path, Object value) {
+					getConfigVoteSites().setValue(path, value);
+				}
+			});
+
+			addDirectlyDefinedRewards(new DirectlyDefinedReward("VoteSites." + site.getKey() + ".WaitUntilVoteDelayRewards") {
+
+				@Override
+				public void createSection(String key) {
+					getConfigVoteSites().createSection(key);
+				}
+
+				@Override
+				public ConfigurationSection getFileData() {
+					return getConfigVoteSites().getData();
+				}
+
+				@Override
+				public void save() {
+					getConfigVoteSites().saveData();
+				}
+
+				@Override
+				public void setData(String path, Object value) {
+					getConfigVoteSites().setValue(path, value);
+				}
+			});
+
+			addDirectlyDefinedRewards(new DirectlyDefinedReward("VoteSites." + site.getKey() + ".CoolDownEndRewards") {
+
+				@Override
+				public void createSection(String key) {
+					getConfigVoteSites().createSection(key);
+				}
+
+				@Override
+				public ConfigurationSection getFileData() {
+					return getConfigVoteSites().getData();
+				}
+
+				@Override
+				public void save() {
+					getConfigVoteSites().saveData();
+				}
+
+				@Override
+				public void setData(String path, Object value) {
+					getConfigVoteSites().setValue(path, value);
+				}
+			});
+		}
+		
+		ConfigurationSection voteMilestonesSection = plugin.getSpecialRewardsConfig().getData()
+				.getConfigurationSection("VoteMilestones");
+
+		if (voteMilestonesSection != null) {
+			for (String milestoneId : voteMilestonesSection.getKeys(false)) {
+				addSpecialRewardsEditorPath("VoteMilestones." + milestoneId + ".Rewards");
+			}
+		}
+		
+		// VoteStreak rewards
+		ConfigurationSection voteStreaksSection = plugin.getSpecialRewardsConfig().getData()
+				.getConfigurationSection("VoteStreaks");
+
+		if (voteStreaksSection != null) {
+			for (String streakId : voteStreaksSection.getKeys(false)) {
+				if ("ProgressGroups".equalsIgnoreCase(streakId)) {
+					continue;
+				}
+
+				ConfigurationSection streakSection = voteStreaksSection.getConfigurationSection(streakId);
+				if (streakSection == null) {
+					continue;
+				}
+
+				addSpecialRewardsEditorPath("VoteStreaks." + streakId + ".Rewards");
+			}
+
+			ConfigurationSection progressGroupsSection = voteStreaksSection.getConfigurationSection("ProgressGroups");
+
+			if (progressGroupsSection != null) {
+				for (String groupId : progressGroupsSection.getKeys(false)) {
+					ConfigurationSection groupSection = progressGroupsSection.getConfigurationSection(groupId);
+					if (groupSection == null) {
+						continue;
+					}
+
+					addSpecialRewardsEditorPath(
+							"VoteStreaks.ProgressGroups." + groupId + ".LostRewards");
+
+					ConfigurationSection milestonesSection = groupSection.getConfigurationSection("Milestones");
+					if (milestonesSection == null) {
+						continue;
+					}
+
+					for (String milestoneId : milestonesSection.getKeys(false)) {
+						ConfigurationSection milestoneSection = milestonesSection
+								.getConfigurationSection(milestoneId);
+
+						if (milestoneSection == null) {
+							continue;
+						}
+
+						addSpecialRewardsEditorPath(
+								"VoteStreaks.ProgressGroups." + groupId
+										+ ".Milestones." + milestoneId + ".Rewards");
+					}
+				}
+			}
+		}
+
+		// vote streaks, old way
+		String[] types = new String[] { "Day", "Week", "Month" };
+		for (String type : types) {
+			for (String str : plugin.getSpecialRewardsConfig().getVoteStreakVotes(type)) {
+				addDirectlyDefinedRewards(new DirectlyDefinedReward("VoteStreak." + type + "." + str + ".Rewards") {
+
+					@Override
+					public void createSection(String key) {
+						getSpecialRewardsConfig().createSection(key);
+					}
+
+					@Override
+					public ConfigurationSection getFileData() {
+						return getSpecialRewardsConfig().getData();
+					}
+
+					@Override
+					public void save() {
+						getSpecialRewardsConfig().saveData();
+					}
+
+					@Override
+					public void setData(String path, Object value) {
+						getSpecialRewardsConfig().setValue(path, value);
+					}
+				});
+			}
+		}
+
+		for (String path : plugin.getSpecialRewardsConfig().getMonthlyPossibleRewardPlaces()) {
+			addDirectlyDefinedRewards(
+					new DirectlyDefinedReward(plugin.getSpecialRewardsConfig().getMonthlyAwardRewardsPath(path)) {
+
+						@Override
+						public void createSection(String key) {
+							getSpecialRewardsConfig().createSection(key);
+						}
+
+						@Override
+						public ConfigurationSection getFileData() {
+							return getSpecialRewardsConfig().getData();
+						}
+
+						@Override
+						public void save() {
+							getSpecialRewardsConfig().saveData();
+						}
+
+						@Override
+						public void setData(String path, Object value) {
+							getSpecialRewardsConfig().setValue(path, value);
+						}
+					});
+		}
+
+		for (String path : plugin.getSpecialRewardsConfig().getWeeklyPossibleRewardPlaces()) {
+			addDirectlyDefinedRewards(
+					new DirectlyDefinedReward(plugin.getSpecialRewardsConfig().getWeeklyAwardRewardsPath(path)) {
+
+						@Override
+						public void createSection(String key) {
+							getSpecialRewardsConfig().createSection(key);
+						}
+
+						@Override
+						public ConfigurationSection getFileData() {
+							return getSpecialRewardsConfig().getData();
+						}
+
+						@Override
+						public void save() {
+							getSpecialRewardsConfig().saveData();
+						}
+
+						@Override
+						public void setData(String path, Object value) {
+							getSpecialRewardsConfig().setValue(path, value);
+						}
+					});
+		}
+
+		for (String path : plugin.getSpecialRewardsConfig().getDailyPossibleRewardPlaces()) {
+			addDirectlyDefinedRewards(
+					new DirectlyDefinedReward(plugin.getSpecialRewardsConfig().getDailyAwardRewardsPath(path)) {
+
+						@Override
+						public void createSection(String key) {
+							getSpecialRewardsConfig().createSection(key);
+						}
+
+						@Override
+						public ConfigurationSection getFileData() {
+							return getSpecialRewardsConfig().getData();
+						}
+
+						@Override
+						public void save() {
+							getSpecialRewardsConfig().saveData();
+						}
+
+						@Override
+						public void setData(String path, Object value) {
+							getSpecialRewardsConfig().setValue(path, value);
+						}
+					});
+		}
+
+		for (String identifier : plugin.getShopFile().getShopIdentifiers()) {
+			addDirectlyDefinedRewards(new DirectlyDefinedReward("Shop." + identifier + ".Rewards") {
+
+				@Override
+				public void createSection(String key) {
+					getShopFile().createSection(key);
+				}
+
+				@Override
+				public ConfigurationSection getFileData() {
+					return getShopFile().getData();
+				}
+
+				@Override
+				public void save() {
+					getShopFile().saveData();
+				}
+
+				@Override
+				public void setData(String path, Object value) {
+					getShopFile().setValue(path, value);
+				}
+			});
+		}
+
+		ConfigurationSection categoriesSection = plugin.getShopFile().getCategoriesSection();
+		if (categoriesSection != null) {
+			for (String categoryShop : categoriesSection.getKeys(false)) {
+				if (plugin.getShopFile().getCategoryShopSection(categoryShop) != null) {
+					for (String categoryShopItems : plugin.getShopFile().getCategoryShopSection(categoryShop)
+							.getKeys(false)) {
+						addDirectlyDefinedRewards(new DirectlyDefinedReward(
+								"Categories." + categoryShop + "." + categoryShopItems + ".Rewards") {
+
+							@Override
+							public void createSection(String key) {
+								getShopFile().createSection(key);
+							}
+
+							@Override
+							public ConfigurationSection getFileData() {
+								return getShopFile().getData();
+							}
+
+							@Override
+							public void save() {
+								getShopFile().saveData();
+							}
+
+							@Override
+							public void setData(String path, Object value) {
+								getShopFile().setValue(path, value);
+							}
+						});
+					}
+				}
+			}
+		}
+
+		// NameMC like reward
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("NameMCLikeReward.Rewards") {
+
+			@Override
+			public void createSection(String key) {
+				getSpecialRewardsConfig().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getSpecialRewardsConfig().getData();
+			}
+
+			@Override
+			public void save() {
+				getSpecialRewardsConfig().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getSpecialRewardsConfig().setValue(path, value);
+			}
+		});
+
+		addDirectlyDefinedRewards(new DirectlyDefinedReward("BungeeVotePartyRewards") {
+
+			@Override
+			public void createSection(String key) {
+				getBungeeSettings().createSection(key);
+			}
+
+			@Override
+			public ConfigurationSection getFileData() {
+				return getBungeeSettings().getData();
+			}
+
+			@Override
+			public void save() {
+				getBungeeSettings().saveData();
+			}
+
+			@Override
+			public void setData(String path, Object value) {
+				getBungeeSettings().setValue(path, value);
+			}
+		});
+
+		getRewardHandler().checkDirectlyDefined();
+
+	}
+
+	private void loadTimer() {
+		plugin.getBukkitScheduler().runTaskLaterAsynchronously(plugin, new Runnable() {
+
+			@Override
+			public void run() {
+				getTimer().scheduleWithFixedDelay(new Runnable() {
+
+					@Override
+					public void run() {
+						if (plugin != null) {
+							update();
+						}
+					}
+				}, 1000 * 60 * 4,
+						ParsedDuration.parse(configFile.getDelayBetweenUpdates(), TimeUnit.MINUTES).getMillis(),
+						TimeUnit.MILLISECONDS);
+
+				if (configFile.isExtraBackgroundUpdate()) {
+					getTimer().scheduleWithFixedDelay(new Runnable() {
+
+						@Override
+						public void run() {
+							if (plugin != null && configFile.isExtraBackgroundUpdate()) {
+								basicBungeeUpdate();
+							}
+						}
+					}, 1000, 1000 * 30, TimeUnit.MILLISECONDS);
+				}
+			}
+		}, 2);
+
+	}
+
+	private void loadVersionFile() {
+		YamlConfiguration conf = getVersionFile();
+		if (conf != null) {
+			time = conf.getString("time", "");
+			profile = conf.getString("profile", "");
+			buildNumber = conf.getString("buildnumber", "NOTSET");
+		}
+	}
+
+	public void loadVoteSites() {
+		configVoteSites.setup();
+		voteSiteManager = new VoteSiteManager(this);
+		voteSiteManager.loadVoteSites();
+
+		plugin.debug("Loaded VoteSites");
+	}
+
+	private void loadVoteTimer() {
+		voteTimer = Executors.newSingleThreadScheduledExecutor();
+	}
+
+	@Deprecated
+	public List<VoteSite> getVoteSites() {
+		return voteSiteManager.getVoteSites();
+	}
+
+	/**
+	 * Metrics.
+	 */
+	private void metrics() {
+		new VotingPluginMetrics().load(plugin);
+	}
+
+	@Override
+	public void onPostLoad() {
+		// auto conversion for Shop.yml
+		if (plugin.getShopFile().isJustCreated()) {
+			if (!plugin.getGui().isJustCreated() && !getServerData().isVoteShopConverted()) {
+				plugin.getLogger().warning("Converting VoteShop configuration to Shop.yml from GUI.yml");
+				plugin.getShopFile().convertFromGUIFile();
+			}
+			getServerData().setShopConverted(true);
+		} else if (!getServerData().isVoteShopConverted()) {
+			getServerData().setShopConverted(true);
+		}
+
+		// vote reminder migration
+		VoteRemindersLegacyMigrator.migrateIfNeeded(this, new File(getDataFolder(), "Config.yml"),
+				getConfigFile().getData());
+
+		voteRemindersManager = new VoteRemindersManager(this, new UserDataVoteReminderCooldownStore(this));
+		voteRemindersManager.reload();
+
+		loadVersionFile();
+		getOptions().setServer(bungeeSettings.getServer());
+
+		// only purges if enabled in config
+		getVotingPluginUserManager().purgeOldPlayersNoData();
+
+		voteTester = new VoteTester(plugin);
+
+		loadVoteTimer();
+
+		if (bungeeSettings.isUseBungeecoord()) {
+			loadBungeeHandler();
+		}
+
+		if (!bungeeSettings.isUseBungeecoord() || !bungeeSettings.isGloblalDataEnabled()) {
+			this.timeQueueHandler = new TimeQueueHandler(this);
+		}
+
+		if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+			if (getConfigFile().isLoadInteralExpansion()) {
+				new VotingPluginExpansion(this).register();
+				getLogger().info("Loading PlaceholderAPI expansion");
+			}
+		}
+		
+		voteMilestonesManager = new VoteMilestonesManager(this);
+		
+		voteStreakHandler = new VoteStreakHandler(this);
+		voteStreakHandler.reload();
+
+		registerCommands();
+		checkVotifier();
+		registerEvents();
+
+		loadVoteBroadcast();
+
+		loadVoteShopManager();
+
+		loadDirectlyDefined();
+		checkUpdate = new CheckUpdate(this);
+		checkUpdate.startUp();
+		specialRewards = new SpecialRewards(this);
+		signs = new Signs(this);
+
+		coolDownCheck.checkEnabled();
+		coolDownCheck.load();
+
+		plugin.getBukkitScheduler().runTask(plugin, new Runnable() {
+
+			@Override
+			public void run() {
+				signs.loadSigns();
+			}
+		});
+
+		topVoterHandler = new TopVoterHandler(this);
+		lastMonthTopVoter = new LinkedHashMap<>();
+		previousMonthsTopVoters = new LinkedHashMap<>();
+
+		topVoter = new LinkedHashMap<>();
+		for (TopVoter top : TopVoter.values()) {
+			topVoter.put(top, new LinkedHashMap<>());
+		}
+		voteToday = new LinkedHashMap<>();
+
+		new AdminGUI(this).loadHook();
+
+		// vote party
+		voteParty = new VoteParty(this);
+		voteParty.register();
+
+		topVoterHandler.register();
+
+		
+
+		plugin.getBukkitScheduler().runTaskAsynchronously(plugin, new Runnable() {
+
+			@Override
+			public void run() {
+				metrics();
+			}
+		});
+
+		// javascript api
+		getJavascriptEngineRequests().add(new JavascriptPlaceholderRequest("User") {
+
+			@Override
+			public Object getObject(OfflinePlayer player) {
+				return getVotingPluginUserManager().getVotingPluginUser(player);
+			}
+		});
+		getJavascriptEngine().put("VotingPluginHooks", VotingPluginHooks.getInstance());
+		getJavascriptEngine().put("VotingPlugin", this);
+
+		loadTimer();
+
+		// placeholderapi loading
+		placeholders = new PlaceHolders(this);
+		getServerData().updatePlaceholders();
+		placeholders.load();
+
+		if (Bukkit.getPluginManager().isPluginEnabled("MVdWPlaceholderAPI")) {
+			mvdwPlaceholders = new MVdWPlaceholders(this);
+			mvdwPlaceholders.loadMVdWPlaceholders();
+		}
+
+		if (Bukkit.getPluginManager().isPluginEnabled("DiscordSRV") && configFile.isDiscordSRVEnabled()) {
+			discordHandler = new DiscordHandler(this);
+			discordHandler.load();
+			debug("DiscordSRV enabled, loading DiscordSRV handler");
+		}
+
+		// load vote logging if enabled
+		loadVoteLoggingMySQL();
+
+		webhooks = new VotingPluginWebhooks(this);
+		webhooks.reload(getConfig().getConfigurationSection("Webhooks"));
+
+		if (getSpecialRewardsConfig().isNameMCLikeRewardEnabled()) {
+			nameMCLikeCheckerTask = new NameMCLikeCheckerTask(this);
+
+			long interval = Math.max(1, getSpecialRewardsConfig().getNameMCLikeRewardCheckIntervalMinutes()) * 60L
+					* 20L;
+			nameMCLikeCheckerTask.runTaskTimerAsynchronously(this, 20L, interval);
+		}
+
+		// Add rewards
+		getRewardHandler().addInjectedReward(new RewardInjectInt("Points", 0) {
+
+			@Override
+			public String onRewardRequest(Reward reward, com.bencodez.advancedcore.api.user.AdvancedCoreUser user,
+					int num, HashMap<String, String> placeholders) {
+				VotingPluginUser vpUser = getVotingPluginUserManager().getVotingPluginUser(user);
+				String str = "" + vpUser.addPoints(num);
+				debug("Setting points to " + str);
+				return str;
+			}
+		}.synchronize().asPlaceholder("newpoints").addEditButton(
+				new EditGUIButton(new ItemBuilder(Material.PAPER), new EditGUIValueNumber("Points", null) {
+
+					@Override
+					public void setValue(Player player, Number value) {
+						RewardEditData reward = (RewardEditData) getInv().getData("Reward");
+						reward.setValue("Points", value.intValue());
+					}
+				}.addLore("Give player voting points"))).validator(new RewardInjectValidator() {
+
+					@Override
+					public void onValidate(Reward reward, RewardInject inject, ConfigurationSection data) {
+						if (data.getInt(inject.getPath(), -1) == 0) {
+							warning(reward, inject, "Points can not be 0");
+						}
+					}
+				}));
+
+		getRewardHandler().addInjectedReward(new RewardInjectConfigurationSection("VoteBossBar") {
+
+			@Override
+			public String onRewardRequested(Reward arg0, com.bencodez.advancedcore.api.user.AdvancedCoreUser user,
+					ConfigurationSection section, HashMap<String, String> placeholders) {
+				if (section.getBoolean("Enabled")) {
+					user.sendBossBar(
+							PlaceholderUtils.replacePlaceHolder(section.getString("Message", ""), placeholders),
+							section.getString("Color", "BLUE"), section.getString("Style", "SOLID"),
+							(double) getVotingPluginUserManager().getVotingPluginUser(user).getSitesVotedOn()
+									/ plugin.getVoteSites().size(),
+							section.getInt("Delay", 30));
+				}
+				return null;
+			}
+		});
+
+		getRewardHandler().addInjectedReward(new RewardInjectConfigurationSection("WebhookReward") {
+
+			@Override
+			public String onRewardRequested(Reward reward, AdvancedCoreUser user, ConfigurationSection section,
+					HashMap<String, String> placeholders) {
+
+				if (section == null || webhooks == null) {
+					return null;
+				}
+
+				// Parse list from inside this section
+				List<WebhookRewardEntry> entries = WebhookRewardParser.parse(section);
+
+				if (entries == null || entries.isEmpty()) {
+					return null;
+				}
+
+				webhooks.createExecutor().executeAll(entries, (input) -> {
+					return PlaceholderUtils.replacePlaceHolder(input, placeholders);
+				});
+
+				return null;
+			}
+		});
+
+		getRewardHandler().addInjectedRequirements(new RequirementInjectConfigurationSection("VoteTotal") {
+
+			@Override
+			public boolean onRequirementsRequested(Reward reward, AdvancedCoreUser acUser, ConfigurationSection section,
+					RewardOptions rewardOptions) {
+				boolean atleast = section.getBoolean("AtleastMode", false);
+				VotingPluginUser user = plugin.getVotingPluginUserManager().getVotingPluginUser(acUser);
+
+				for (TopVoter top : TopVoter.values()) {
+					int required = section.getInt(top.toString(), -1);
+					if (required >= 0) {
+						int total = user.getTotal(top);
+						if (atleast) {
+							if (total < required) {
+								debug("Failed requirement " + top.toString() + " " + total + "/" + required);
+								return false;
+							}
+						} else {
+							if (total != required) {
+								debug("Failed requirement " + top.toString() + " " + total + "!=" + required);
+								return false;
+							}
+						}
+					}
+				}
+
+				int pointsRequired = section.getInt("Points", -1);
+				if (pointsRequired >= 0) {
+					int points = user.getPoints();
+					if (atleast) {
+						if (points < pointsRequired) {
+							debug("Failed requirement points " + points + "/" + pointsRequired);
+							return false;
+						}
+					} else {
+						if (points != pointsRequired) {
+							debug("Failed requirement points " + points + "!=" + pointsRequired);
+							return false;
+						}
+					}
+				}
+
+				return true;
+			}
+		});
+
+		for (final TopVoter top : TopVoter.values()) {
+			getRewardHandler().addPlaceholder(new RewardPlaceholderHandle("Total_" + top.toString()) {
+
+				@Override
+				public String getValue(Reward reward, com.bencodez.advancedcore.api.user.AdvancedCoreUser user) {
+					VotingPluginUser vUser = getVotingPluginUserManager().getVotingPluginUser(user);
+					return "" + vUser.getTotal(top);
+				}
+			});
+		}
+
+		plugin.getLogger().info("Enabled VotingPlugin " + plugin.getDescription().getVersion());
+		if (plugin.getDescription().getVersion().contains("SNAPSHOT")) {
+			plugin.getLogger().info(
+					"Using dev build, this is not a stable build, use at your own risk. Build number: " + buildNumber);
+		}
+
+		boolean hasRewards = getRewardHandler().hasRewards(getConfigVoteSites().getData(),
+				getConfigVoteSites().getEverySiteRewardPath());
+
+		boolean issues = true;
+		ArrayList<String> services = serverData.getServiceSites();
+		for (VoteSite site : getVoteSites()) {
+			if (!site.hasRewards() && !hasRewards) {
+				issues = false;
+				plugin.getLogger().warning("No rewards detected for the site: " + site.getKey()
+						+ ". See https://github.com/BenCodez/VotingPlugin/wiki/Rewards");
+			}
+
+			boolean contains = false;
+			for (String service : services) {
+				if (service.equalsIgnoreCase(site.getServiceSite())) {
+					contains = true;
+				}
+			}
+			if (!contains && !getConfigFile().isDisableNoServiceSiteMessage()) {
+				issues = false;
+				plugin.getLogger().warning("No vote has been received from " + site.getServiceSite()
+						+ ", may be an invalid service site. Please read: https://github.com/BenCodez/VotingPlugin/wiki/Votifier-Troubleshooting");
+			}
+		}
+
+		if (!issues) {
+			plugin.getBukkitScheduler().runTaskLaterAsynchronously(plugin, new Runnable() {
+
+				@Override
+				public void run() {
+					plugin.getLogger().warning(
+							"Detected an issue with voting sites, check the server startup log for more details: https://github.com/BenCodez/VotingPlugin/wiki/Votifier-Troubleshooting");
+				}
+			}, 5);
+
+			plugin.getBukkitScheduler().runTaskLaterAsynchronously(plugin, new Runnable() {
+
+				@Override
+				public void run() {
+					serviceSiteHandler = new ServiceSiteHandler(plugin);
+				}
+			}, 10);
+		}
+
+	}
+
+	private void migrateVoteBroadcast(Config configFile) {
+		ConfigurationSection cfg = configFile.getData();
+		// If new section exists, do nothing
+		if (cfg.isConfigurationSection("VoteBroadcast")) {
+			return;
+		}
+
+		// Create VoteBroadcast section
+		org.bukkit.configuration.ConfigurationSection vb = cfg.createSection("VoteBroadcast");
+
+		// Detect old AlternateBroadcast
+		boolean altEnabled = cfg.getBoolean("Format.AlternateBroadcast.Enabled", false);
+		int altDelay = cfg.getInt("Format.AlternateBroadcast.Delay", 30);
+		String altMsg = cfg.getString("Format.AlternateBroadcast.Broadcast",
+				"&6[Vote] &a%numberofplayers% voted recently! /vote");
+
+		// Old single vote message
+		String oldBroadcastMsg = cfg.getString("Format.BroadcastMsg",
+				"&6[Vote] &aThanks &e%player% &afor voting on &e%SiteName%");
+
+		// Map old -> new
+		if (altEnabled) {
+			vb.set("Type", "INTERVAL_SUMMARY_GLOBAL");
+			vb.set("Duration", altDelay + "m");
+			vb.set("MaxSitesListed", 0);
+
+			org.bukkit.configuration.ConfigurationSection fmt = vb.createSection("Format");
+
+			// Header uses the old interval broadcast line (make it clearer + include new
+			// placeholders)
+			fmt.set("Header", altMsg.replace("%numberofplayers%", "%numberofplayers%").replace("%players%", "%players%")
+					.replace("%numberofsites%", "%numberofsites%").replace("%sites%", "%sites%"));
+
+			// Default: list entries like "Player (N)" (the handler feeds that as item text)
+			fmt.set("ListLine", "&7 - &6%site%");
+			fmt.set("BroadcastMsg", "&6[Vote] &aThanks &e%player% &afor voting on &e%site%&a!");
+
+		} else {
+			vb.set("Type", "EVERY_VOTE");
+			vb.set("Duration", "2m");
+			vb.set("MaxSitesListed", 0);
+
+			org.bukkit.configuration.ConfigurationSection fmt = vb.createSection("Format");
+			fmt.set("BroadcastMsg", oldBroadcastMsg.replace("%SiteName%", "%site%")); // convert placeholder name
+			fmt.set("Header", "&6[Vote] &aThanks &e%player% &afor voting on &e%sites_count% &asites:");
+			fmt.set("ListLine", "&7 - &e%site%");
+		}
+		plugin.getLogger().info("Migrated vote broadcast settings to new format.");
+		configFile.saveData();
+	}
+
+	/*
+	 * (non-Javadoc)
+	 *
+	 * @see org.bukkit.plugin.java.JavaPlugin#onEnable()
+	 */
+	@Override
+	public void onPreLoad() {
+		plugin = this;
+
+		setupFiles();
+
+		loadVoteSites();
+
+		votingPluginUserManager = new UserManager(this);
+		votingPluginUserManager.addCachingKeys();
+
+		updateAdvancedCoreHook();
+
+		addUserStartup(new UserStartup() {
+
+			@Override
+			public void onStartUp(AdvancedCoreUser user) {
+
+			}
+
+			@Override
+			public void onStart() {
+
+			}
+
+			@Override
+			public void onFinish() {
+				topVoterHandler.loadLastMonth();
+
+				topVoterHandler.loadPreviousMonthTopVoters();
+
+				setUpdate(true);
+				update();
+			}
+		});
+
+	}
+
+	/*
+	 * (non-Javadoc)
+	 *
+	 * @see org.bukkit.plugin.java.JavaPlugin#onDisable()
+	 */
+	@Override
+	public void onUnLoad() {
+		if (bungeeSettings.isUseBungeecoord()) {
+			try {
+				getBungeeHandler().close();
+			} catch (Exception e) {
+				debug(e);
+			}
+		}
+		if (webhooks != null) {
+			webhooks.shutdown();
+			webhooks = null;
+		}
+		voteTimer.shutdown();
+		try {
+			voteTimer.awaitTermination(1, TimeUnit.SECONDS);
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		}
+		voteTimer.shutdownNow();
+		if (timeQueueHandler != null) {
+			timeQueueHandler.save();
+		}
+
+		if (voteRemindersManager != null) {
+			voteRemindersManager.shutdown();
+			voteRemindersManager = null;
+		}
+
+		if (coolDownCheck != null) {
+			coolDownCheck.shutdown();
+			coolDownCheck = null;
+		}
+
+		getSigns().storeSigns();
+		HandlerList.unregisterAll(plugin);
+		plugin = null;
+	}
+
+	/**
+	 * Register commands.
+	 */
+	private void registerCommands() {
+		commandLoader = new CommandLoader(this);
+		commandLoader.loadCommands();
+		commandLoader.loadAliases();
+
+		registerVoteCommand();
+
+		// /adminvote, /av
+		getCommand("adminvote").setExecutor(new CommandAdminVote(this));
+		getCommand("adminvote").setTabCompleter(new AdminVoteTabCompleter());
+		getCommand("adminvote").setPermission("VotingPlugin.Commands.AdminVote");
+		getCommand("av").setExecutor(new CommandAdminVote(this));
+		getCommand("av").setTabCompleter(new AdminVoteTabCompleter());
+		getCommand("av").setPermission("VotingPlugin.Commands.AdminVote");
+
+		Permission perm = Bukkit.getPluginManager().getPermission("VotingPlugin.Player");
+		if (perm != null) {
+			if (configFile.isGiveDefaultPermission()) {
+				perm.setDefault(PermissionDefault.TRUE);
+				getLogger().info("Giving VotingPlugin.Player permission by default, can be disabled in the config");
+			} else {
+				perm.setDefault(PermissionDefault.OP);
+			}
+		}
+
+		plugin.debug("Loaded Commands");
+
+	}
+
+	/**
+	 * Registers the /vote command respecting VoteCommandEnabled and VoteCommandName config options.
+	 * The command is NOT declared in plugin.yml — it is created and registered entirely
+	 * in code. When disabled, no command exists, giving native "Unknown command" behavior.
+	 */
+	private void registerVoteCommand() {
+		boolean enabled = configFile.isVoteCommandEnabled();
+		String name = configFile.getVoteCommandName();
+
+		if (name == null || name.trim().isEmpty()) {
+			name = "vote";
+		}
+		name = name.trim().toLowerCase(Locale.ROOT);
+
+		if (!enabled) {
+			return;
+		}
+
+		registeredVoteCommand = createPluginCommand(name);
+		if (registeredVoteCommand == null) {
+			getLogger().warning("Failed to create /" + name + " command");
+			return;
+		}
+
+		registeredVoteCommand.setDescription("Vote command");
+		registeredVoteCommand.setExecutor(new CommandVote(this));
+		registeredVoteCommand.setTabCompleter(new VoteTabCompleter());
+
+		CommandMap commandMap = getServerCommandMap();
+		if (commandMap != null) {
+			commandMap.register(getName().toLowerCase(Locale.ROOT), registeredVoteCommand);
+			getLogger().info("Registered /" + name + " command");
+		} else {
+			getLogger().warning("Failed to register /" + name + ": CommandMap unavailable");
+		}
+	}
+
+	/**
+	 * Unregisters the current vote command and re-registers with updated config.
+	 * Called on /av reload so changes to VoteCommandEnabled/VoteCommandName
+	 * take effect without a server restart.
+	 */
+	private void reloadVoteCommand() {
+		if (registeredVoteCommand != null) {
+			CommandMap commandMap = getServerCommandMap();
+			if (commandMap != null) {
+				registeredVoteCommand.unregister(commandMap);
+			}
+			registeredVoteCommand = null;
+		}
+		registerVoteCommand();
+	}
+
+	/**
+	 * Creates a PluginCommand instance. Constructor is protected so we use reflection.
+	 */
+	private PluginCommand createPluginCommand(String name) {
+		try {
+			java.lang.reflect.Constructor<PluginCommand> ctor = PluginCommand.class
+					.getDeclaredConstructor(String.class, org.bukkit.plugin.Plugin.class);
+			ctor.setAccessible(true);
+			return ctor.newInstance(name, this);
+		} catch (Exception e) {
+			getLogger().warning("Failed to create PluginCommand: " + e.getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * Gets the server's CommandMap via reflection.
+	 *
+	 * @return the CommandMap, or null if it cannot be accessed
+	 */
+	private CommandMap getServerCommandMap() {
+		try {
+			Field field = Bukkit.getServer().getClass().getDeclaredField("commandMap");
+			field.setAccessible(true);
+			return (CommandMap) field.get(Bukkit.getServer());
+		} catch (Exception e) {
+			getLogger().warning("Failed to access CommandMap: " + e.getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * Register events.
+	 */
+	private void registerEvents() {
+		PluginManager pm = getServer().getPluginManager();
+
+		pm.registerEvents(new PlayerJoinEvent(this), this);
+		if (votifierLoaded) {
+			pm.registerEvents(new VotiferEvent(this), this);
+		}
+		pm.registerEvents(new PlayerVoteListener(this), this);
+		pm.registerEvents(new PlayerPostVoteLoggerListener(this), this);
+		pm.registerEvents(new PlayerSpecialRewardLoggerListener(this), this);
+		pm.registerEvents(new VoteShopPurchaseLoggerListener(this), this);
+		pm.registerEvents(new VoteMilestoneVoteLogListener(this), this);
+		pm.registerEvents(new SignChange(this), this);
+		pm.registerEvents(new BlockBreak(this), this);
+
+		pm.registerEvents(new VoteRemindersListener(this), this);
+
+		if (!plugin.getConfigFile().isDisableInteractEvent()) {
+			pm.registerEvents(new PlayerInteract(this), this);
+		}
+
+		if (timeQueueHandler != null) {
+			pm.registerEvents(timeQueueHandler, plugin);
+		}
+
+		pm.registerEvents(new VotingPluginUpdateEvent(this), this);
+		/*
+		 * if (!NMSManager.getInstance().isVersion("1.12")) { pm.registerEvents(new
+		 * PlayerCommandSendListener(this), this); }
+		 */
+		coolDownCheck = new CoolDownCheck(this);
+		pm.registerEvents(coolDownCheck, this);
+
+		pm.registerEvents(new AliasCommandFilterListener(this), this);
+
+		plugin.debug("Loaded Events");
+
+	}
+
+	/**
+	 * Reload.
+	 */
+	@Override
+	public void reload() {
+		reloadPlugin(false);
+	}
+
+	public void reloadAll() {
+		reloadPlugin(true);
+	}
+
+	private void reloadPlugin(boolean userStorage) {
+		configFile.reloadData();
+		configFile.loadValues();
+
+		configVoteSites.reloadData();
+
+		specialRewardsConfig.reloadData();
+
+		voteMilestonesManager.reload();
+
+		gui.reloadData();
+		shopFile.reloadData();
+
+		bungeeSettings.reloadData();
+		updateAdvancedCoreHook();
+
+		reloadAdvancedCore(userStorage);
+
+		if (bungeeSettings.isUseBungeecoord()) {
+			if (getBungeeHandler() == null) {
+				loadBungeeHandler();
+			}
+			if (userStorage) {
+				getBungeeHandler().loadGlobalMysql();
+			}
+		}
+		checkYMLError();
+
+		plugin.loadVoteSites();
+
+		getOptions().setServer(bungeeSettings.getServer());
+		if (userStorage) {
+			placeholders.load();
+			placeholders.reload();
+		}
+
+		if (voteRemindersManager != null) {
+			voteRemindersManager.reload();
+		}
+
+		webhooks.reload(getConfig().getConfigurationSection("Webhooks"));
+
+		coolDownCheck.checkEnabled();
+
+		getVoteStreakHandler().reload();
+
+		reloadVoteCommand();
+
+		loadVoteBroadcast();
+
+		voteShopManager.reload();
+
+		loadDirectlyDefined();
+
+		setUpdate(true);
+	}
+
+	private void loadVoteBroadcast() {
+		ConfigurationSection sec = getConfigFile().getData().getConfigurationSection("VoteBroadcast");
+		BroadcastSettings settings = BroadcastSettings.load(sec);
+
+		if (broadcastHandler == null) {
+			// Backend servers only: create once
+			broadcastHandler = new BroadcastHandler(this, settings, ZoneId.systemDefault());
+		} else {
+			// Reload-safe: just update settings + reschedule interval if needed
+			broadcastHandler.setSettings(settings);
+		}
+	}
+
+	private void setupFiles() {
+		configFile = new Config(this);
+		configFile.setup();
+		configFile.setIgnoreCase(plugin.getConfigFile().isCaseInsensitiveYMLFiles());
+		configFile.reloadData();
+
+		migrateVoteBroadcast(configFile);
+
+		configVoteSites = new ConfigVoteSites(this);
+		configVoteSites.setup();
+
+		specialRewardsConfig = new SpecialRewardsConfig(this);
+		specialRewardsConfig.setup();
+
+		bungeeSettings = new BungeeSettings(this);
+		bungeeSettings.setup();
+
+		serverData = new ServerData(this);
+
+		gui = new GUI(this);
+		gui.setup();
+
+		shopFile = new ShopFile(this);
+		shopFile.setup();
+
+		checkYMLError();
+
+		plugin.debug("Loaded Files");
+	}
+
+	public synchronized void update() {
+		if (!(update || configFile.isAlwaysUpdate())) {
+			return;
+		}
+		if (plugin == null) {
+			return;
+		}
+		if (updateStarted) {
+			return;
+		}
+		if (configFile.isUpdateWithPlayersOnlineOnly() && Bukkit.getOnlinePlayers().isEmpty()) {
+			return;
+		}
+
+		updateStarted = true;
+		update = false;
+
+		synchronized (plugin) {
+			try {
+				if (plugin == null || !plugin.isEnabled()) {
+					return;
+				}
+
+				getUserManager().getDataManager().clearCacheBasic();
+				SkullCache.flushWeek();
+
+				plugin.debug("Starting background task, current cached users: "
+						+ plugin.getUserManager().getDataManager().getUserDataCache().keySet().size());
+
+				boolean extraBackgroundUpdate = configFile.isExtraBackgroundUpdate();
+				long startTime = System.currentTimeMillis();
+
+				LinkedHashMap<TopVoterPlayer, HashMap<VoteSite, LocalDateTime>> voteToday = new LinkedHashMap<>();
+				LinkedHashMap<TopVoter, LinkedHashMap<TopVoterPlayer, Integer>> tempTopVoter = new LinkedHashMap<>();
+
+				ArrayList<TopVoter> topVotersToCheck = new ArrayList<>();
+				for (TopVoter top : TopVoter.values()) {
+					if (plugin == null) {
+						return;
+					}
+					if (plugin.getConfigFile().getLoadTopVoter(top)) {
+						topVotersToCheck.add(top);
+						tempTopVoter.put(top, new LinkedHashMap<>());
+					}
+				}
+
+				boolean topVoterIgnorePermissionUse = plugin.getConfigFile().isTopVoterIgnorePermission();
+				ArrayList<String> blackList = plugin.getConfigFile().getBlackList();
+
+				// Compute "today" bounds once (avoid LocalDateTime.now() + MiscUtils
+				// conversions in tight loops)
+				final ZoneId zone = ZoneId.systemDefault();
+				final LocalDate today = LocalDate.now(zone);
+				final long startOfDayMs = today.atStartOfDay(zone).toInstant().toEpochMilli();
+				final long startOfNextDayMs = today.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli();
+
+				final long afterSetup = System.currentTimeMillis();
+
+				// STREAM all users (MYSQL/SQLITE/FLAT) via the new shortcut method
+				plugin.getUserManager().forEachUserKeys((uuid, columns) -> {
+					if (plugin == null || !plugin.isEnabled()) {
+						return;
+					}
+
+					VotingPluginUser user = getVotingPluginUserManager().getVotingPluginUser(uuid, false);
+					user.userDataFetechMode(UserDataFetchMode.TEMP_ONLY);
+					user.updateTempCacheWithColumns(columns);
+
+					try {
+						if (!user.isBanned() && !blackList.contains(user.getPlayerName())) {
+
+							if (!topVoterIgnorePermissionUse || !user.isTopVoterIgnore()) {
+								TopVoterPlayer tvp = user.getTopVoterPlayer();
+								for (TopVoter top : topVotersToCheck) {
+									int total = user.getTotal(top);
+									if (total > 0) {
+										tempTopVoter.get(top).put(tvp, total);
+									}
+								}
+							}
+
+							// Only allocate if we actually find a "today" vote
+							HashMap<VoteSite, LocalDateTime> times = null;
+
+							for (Entry<VoteSite, Long> entry : user.getLastVotes().entrySet()) {
+								VoteSite site = entry.getKey();
+								if (!site.isEnabled() || site.isHidden()) {
+									continue;
+								}
+
+								long time = entry.getValue();
+								if (time >= startOfDayMs && time < startOfNextDayMs) {
+									if (times == null) {
+										times = new HashMap<>();
+									}
+									times.put(site, LocalDateTime.ofInstant(Instant.ofEpochMilli(time), zone));
+								}
+							}
+
+							if (times != null && !times.isEmpty()) {
+								voteToday.put(user.getTopVoterPlayer(), times);
+							}
+						}
+
+						if (extraBackgroundUpdate && user.isOnline()) {
+							user.offVote();
+						}
+
+						if (!plugin.getPlaceholders().getCacheLevel().onlineOnly() || user.isOnline()) {
+							plugin.getPlaceholders().onUpdate(user, false);
+						}
+					} finally {
+						user.clearTempCache();
+					}
+
+				}, (count) -> {
+					long time1 = (System.currentTimeMillis() - afterSetup) / 1000;
+					plugin.debug("Finished getting player data in " + time1 + " seconds, " + count + " users, "
+							+ plugin.getStorageType());
+				});
+
+				// Final processing (runs once after ALL users processed)
+				topVoterHandler.updateTopVoters(tempTopVoter);
+				placeholders.onUpdate();
+				setVoteToday(voteToday);
+				serverData.updateValues();
+				getSigns().updateSigns();
+
+				checkFirstTimeLoaded();
+
+				if (plugin.getConfigFile().isDiscordSRVEnabled() && getDiscordHandler() != null) {
+					for (TopVoter top : TopVoter.values()) {
+						if (!plugin.getConfigFile().isDiscordSRVTopVoterNewMessageOnUpdate(top)) {
+							getDiscordHandler().updateTopVoterMessageId(top);
+						}
+					}
+				}
+
+				plugin.getUserManager().getDataManager().clearNonNeededCachedUsers();
+				plugin.extraDebug("Current cached users: "
+						+ plugin.getUserManager().getDataManager().getUserDataCache().keySet().size());
+
+				update = false;
+
+				long totalTime = (System.currentTimeMillis() - startTime) / 1000;
+				lastBackgroundTaskTimeTaken = totalTime;
+				plugin.debug("Background task finished. Total time: " + totalTime + " seconds");
+
+			} catch (Exception ex) {
+				if (plugin != null) {
+					plugin.getLogger().info("Looks like something went wrong");
+				}
+				ex.printStackTrace();
+			} finally {
+				updateStarted = false;
+			}
+		}
+	}
+
+	@Getter
+	private VoteLogMysqlTable voteLogMysqlTable;
+
+	@Getter
+	private VoteMilestonesManager voteMilestonesManager;
+
+	@Getter
+	private VotingPluginWebhooks webhooks;
+
+	public void loadVoteLoggingMySQL() {
+		if (getConfigFile().isVoteLoggingEnabled()) {
+			if (getConfigFile().isVoteLoggingUseMainMySQL()) {
+				voteLogMysqlTable = new VoteLogMysqlTable("votingplugin_votelog", getMysql().getMysql(),
+						new MysqlConfigSpigot(getConfigFile().getVoteLoggingSection()),
+						getOptions().getDebug().isDebug()) {
+
+					@Override
+					public void logSevere(String string) {
+						plugin.getLogger().severe(string);
+					}
+
+					@Override
+					public void logInfo(String string) {
+						plugin.getLogger().info(string);
+					}
+
+					@Override
+					public String getServerName() {
+						if (plugin.getBungeeSettings().isUseBungeecoord()) {
+							return plugin.getBungeeSettings().getServer();
+						} else {
+							return "";
+						}
+					}
+
+					@Override
+					public void debug(Throwable t) {
+						if (getOptions().getDebug().isDebug()) {
+							plugin.debug(t);
+						}
+					}
+				};
+			} else {
+				voteLogMysqlTable = new VoteLogMysqlTable("votingplugin_votelog",
+						new MysqlConfigSpigot(getConfigFile().getVoteLoggingSection()),
+						getOptions().getDebug().isDebug()) {
+
+					@Override
+					public void logSevere(String string) {
+						plugin.getLogger().severe(string);
+					}
+
+					@Override
+					public void logInfo(String string) {
+						plugin.getLogger().info(string);
+					}
+
+					@Override
+					public void debug(Throwable t) {
+						if (getOptions().getDebug().isDebug()) {
+							plugin.debug(t);
+						}
+					}
+
+					@Override
+					public String getServerName() {
+						if (plugin.getBungeeSettings().isUseBungeecoord()) {
+							return plugin.getBungeeSettings().getServer();
+						} else {
+							return "";
+						}
+					}
+				};
+			}
+
+			getTimer().scheduleAtFixedRate(new Runnable() {
+
+				@Override
+				public void run() {
+					voteLogMysqlTable.purgeOlderThanDays(getConfigFile().getVoteLoggingPurgeDays(), 100);
+				}
+			}, 60, 60 * 60, TimeUnit.SECONDS); // Purge old logs every hour
+
+			debug("Vote logging MySQL enabled");
+		} else {
+			debug("Vote logging MySQL disabled");
+		}
+	}
+
+	public void updateAdvancedCoreHook() {
+		getJavascriptEngine().put("VotingPlugin", this);
+		allowDownloadingFromSpigot(15358);
+		setConfigData(new YMLConfig(this, null) {
+			@Override
+			public ConfigurationSection getData() {
+				return configFile.getData();
+			}
+
+			@Override
+			public void createSection(String key) {
+				configFile.createSection(key);
+			}
+
+			@Override
+			public void saveData() {
+				configFile.saveData();
+			}
+
+			@Override
+			public void setValue(String path, Object value) {
+				configFile.setValue(path, value);
+			}
+		});
+		if (bungeeSettings.isUseBungeecoord()) {
+			getOptions().setPerServerRewards(getBungeeSettings().isPerServerRewards());
+		}
+	}
+
+}

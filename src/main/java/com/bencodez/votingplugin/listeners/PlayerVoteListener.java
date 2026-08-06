@@ -1,0 +1,314 @@
+package com.bencodez.votingplugin.listeners;
+
+import com.bencodez.advancedcore.api.bedrock.BedrockNameResolver;
+import com.bencodez.advancedcore.api.user.validation.UserValidationResult;
+import com.bencodez.simpleapi.array.ArrayUtils;
+import com.bencodez.votingplugin.VotingPluginMain;
+import com.bencodez.votingplugin.events.PlayerPostVoteEvent;
+import com.bencodez.votingplugin.events.PlayerVoteEvent;
+import com.bencodez.votingplugin.topvoter.TopVoter;
+import com.bencodez.votingplugin.user.VotingPluginUser;
+import com.bencodez.votingplugin.votesites.VoteSite;
+import org.bukkit.Bukkit;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.UUID;
+
+// TODO: Auto-generated Javadoc
+/**
+ * The Class VotiferEvent.
+ */
+public class PlayerVoteListener implements Listener {
+
+	private VotingPluginMain plugin;
+
+	/**
+	 * Instantiates a new votifer event.
+	 *
+	 * @param plugin the plugin
+	 */
+	public PlayerVoteListener(VotingPluginMain plugin) {
+		this.plugin = plugin;
+	}
+
+	/**
+	 * On votifer event.
+	 *
+	 * @param event the event
+	 */
+	@EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+	public void onplayerVote(PlayerVoteEvent event) {
+		if (!plugin.isEnabled()) {
+			plugin.getLogger().warning("Plugin disabled, ignoring vote");
+			return;
+		}
+		String playerName = event.getPlayer();
+		plugin.debug("Processing PlayerVoteEvent: " + playerName + "/" + event.getServiceSite());
+
+		// check for name casing
+		final String properName = plugin.getUserManager().getProperName(playerName);
+
+		// Validate BEFORE full bedrock/db-backed resolution
+		boolean allowUnJoinedCheckServer = plugin.getConfigFile().isAllowUnJoinedCheckServer();
+		UserValidationResult validationResult = plugin.getUserManager().getValidationService().validate(properName,
+				allowUnJoinedCheckServer);
+
+		plugin.extraDebug("Vote validation result for " + properName + ": valid=" + validationResult.isValid()
+				+ ", source=" + validationResult.getSource() + ", reason=" + validationResult.getReason()
+				+ ", normalizedName=" + validationResult.getNormalizedName() + ", bedrock="
+				+ validationResult.isBedrock());
+
+		if (!validationResult.isValid() && !plugin.getConfigFile().isAllowUnjoined()) {
+			plugin.getLogger().warning("Player " + properName + " has not joined before, disregarding vote. "
+					+ "Reason: " + validationResult.getReason() + ". Set AllowUnjoined to true to accept.");
+			if (event.isBungee() && plugin.getBungeeSettings().isRemoveInvalidUsers()) {
+				plugin.getVotingPluginUserManager().getVotingPluginUser(properName).remove();
+			}
+			return;
+		}
+
+		String creditedName;
+		String resolutionRationale;
+		if (validationResult.isValid()) {
+			// Validation checks exact online and stored identities before attempting a
+			// prefixed Bedrock fallback. Keep that decision authoritative so a second
+			// resolver pass cannot redirect an offline Java vote to an online Bedrock
+			// account with the same base name.
+			creditedName = validationResult.getNormalizedName();
+			if (creditedName == null || creditedName.isEmpty()) {
+				creditedName = properName;
+			}
+			resolutionRationale = "validation-"
+					+ validationResult.getSource().toString().toLowerCase(java.util.Locale.ROOT);
+		} else {
+			// Invalid users only reach this point when AllowUnjoined is enabled. Preserve
+			// the existing resolver behavior for those otherwise unknown identities.
+			BedrockNameResolver.Result rn = plugin.getBedrockHandle().resolve(properName);
+			creditedName = rn.finalName;
+			resolutionRationale = rn.rationale;
+		}
+
+		plugin.debug("Vote name resolved: " + properName + " -> " + creditedName + " (" + resolutionRationale + ")");
+
+		// If we get here, use the resolved/possibly-prefixed name going forward
+		playerName = creditedName;
+
+		if (playerName.isEmpty()) {
+			plugin.getLogger().warning("Empty player name from vote, ignoring");
+			return;
+		}
+
+		if (event.isBungee()) {
+			plugin.debug("BungeePlayerVote forcebungee: " + event.isForceBungee() + ", bungeetotals: "
+					+ event.getBungeeTextTotals());
+
+			if (plugin.getBungeeSettings().isTriggerVotifierEvent()) {
+				try {
+					new ProxyVotifierEvent().send(plugin, event);
+				} catch (NoClassDefFoundError ex) {
+					plugin.getLogger().severe(
+							"Failed to trigger Votifier event for proxy vote. Either install Votifier or disable triggering the Votifier event");
+					plugin.getLogger().severe("Error: " + ex.getMessage());
+					plugin.debug(ex);
+				}
+			}
+		}
+
+		VoteSite voteSite = event.getVoteSite();
+
+		if (voteSite == null) {
+			voteSite = plugin.getVoteSiteManager()
+					.getVoteSite(plugin.getVoteSiteManager().getVoteSiteName(true, event.getServiceSite()), true);
+		}
+
+		// check valid service sites
+		if (voteSite == null) {
+			if (!plugin.getConfigFile().isDisableNoServiceSiteMessage()) {
+				plugin.getLogger().warning("No voting site with the service site: '" + event.getServiceSite() + "'");
+
+				ArrayList<String> services = new ArrayList<>();
+				for (VoteSite site : plugin.getVoteSiteManager().getVoteSites()) {
+					services.add(site.getServiceSite());
+				}
+				plugin.getLogger().warning("Currently set service sites: " + ArrayUtils.makeStringList(services));
+			}
+			return;
+		}
+
+		if (!voteSite.isEnabled()) {
+			plugin.debug("Votesite: " + voteSite.getKey() + " is not enabled");
+			return;
+		}
+
+		VotingPluginUser user = null;
+		if (event.getVotingPluginUser() != null) {
+			user = event.getVotingPluginUser();
+		} else {
+			Player p = Bukkit.getPlayerExact(playerName);
+			if (p != null) {
+				// player online
+				user = plugin.getVotingPluginUserManager().getVotingPluginUser(p);
+			} else {
+				// attempt to get exact name from cache matching casing
+				user = plugin.getVotingPluginUserManager().getVotingPluginUser(playerName);
+			}
+		}
+
+		boolean queuedProxyVoteAlreadyRecorded = ProxyVoteDelayCheck.isQueuedVoteAlreadyRecorded(event.isBungee(),
+				event.getTime(), user.getTime(voteSite));
+		if (voteSite.isWaitUntilVoteDelay() && !queuedProxyVoteAlreadyRecorded && !user.canVoteSite(voteSite)) {
+			if (!event.isRealVote()) {
+				plugin.getLogger().info(user.getPlayerName() + " did a not real vote, bypassing WaitUntilVoteDelay");
+			} else {
+				if (!user.hasPermission("VotingPlugin.BypassWaitUntilVoteDelay")) {
+					plugin.getLogger().info(user.getPlayerName() + " must wait until votedelay is over, ignoring vote");
+					boolean online = user.isOnline();
+					if (event.isBungee()) {
+						online = event.isWasOnline();
+					}
+					if (plugin.getOptions().isProcessRewards()) {
+						voteSite.giveWaitUntilVoteDelayRewards(user, online, event.isBungee());
+					}
+					return;
+				}
+				plugin.getLogger()
+						.info(user.getPlayerName() + " has bypass permission for WaitUntilVoteDelay, bypassing");
+			}
+		}
+		if (queuedProxyVoteAlreadyRecorded) {
+			plugin.debug("Allowing queued proxy vote for " + user.getPlayerName() + " on " + voteSite.getKey()
+					+ "; proxy vote time already matches LastVotes: " + event.getTime());
+		}
+
+		UUID voteUUID = UUID.randomUUID();
+		if (event.isBungee() && event.getBungeeTextTotals() != null) {
+			voteUUID = event.getBungeeTextTotals().getVoteUUID();
+			if (voteUUID == null) {
+				voteUUID = UUID.randomUUID();
+			}
+		}
+
+		final String uuid = user.getUUID();
+
+		// reupdate cache
+		user.cache();
+
+		user.updateName(true);
+
+		// vote party
+		plugin.getVoteParty().vote(user, event.isRealVote(), event.isForceBungee());
+
+		if (event.isBroadcast()) {
+			if (plugin.getBroadcastHandler() != null) {
+				boolean online = user.isOnline();
+				if (event.isBungee()) {
+					online = event.isWasOnline();
+				}
+				if (!user.isVanished()) {
+					plugin.getBroadcastHandler().broadcastVote(user.getJavaUUID(), playerName,
+							voteSite.getDisplayName(), online);
+				} else {
+					plugin.debug("Not broadcasting vote for vanished user: " + user.getPlayerName());
+				}
+			}
+		}
+
+		long voteTime = 0;
+		// update last vote time
+		if (event.getTime() != 0) {
+			user.setTime(voteSite, event.getTime());
+			voteTime = event.getTime();
+		} else {
+			user.setTime(voteSite);
+			voteTime = LocalDateTime.now().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+		}
+
+		boolean cached = false;
+		// check if player has voted on all sites in one day
+		if (((user.isOnline() || voteSite.isGiveOffline()) && plugin.getOptions().isProcessRewards())
+				|| event.isBungee()) {
+			boolean online = true;
+			if (event.isBungee()) {
+				online = event.isWasOnline();
+			}
+			user.playerVote(voteSite, online, event.isForceBungee());
+			if (event.getVoteNumber() == 1) {
+				user.sendVoteEffects(online);
+			}
+			if (plugin.getConfigFile().isCloseInventoryOnVote()) {
+				user.closeInv();
+			}
+		} else {
+			if (!plugin.getConfigFile().isOfflineVotesLimitEnabled()
+					|| user.getNumberOfOfflineVotes(voteSite) <= plugin.getConfigFile().getOfflineVotesLimitAmount()) {
+				user.addOfflineVote(voteSite.getKey());
+				cached = true;
+				plugin.debug(
+						"Offline vote set for " + playerName + " (" + user.getUUID() + ") on " + voteSite.getKey());
+			} else {
+				plugin.debug("Not setting offline vote, offline vote limit reached");
+			}
+		}
+
+		// add to total votes
+		if ((plugin.getConfigFile().isCountFakeVotes() || event.isRealVote()) && event.isAddTotals()) {
+			if (plugin.getConfigFile().isAddTotals()) {
+				if (plugin.getConfigFile().isAddTotalsOffline() || user.isOnline()) {
+					user.addTotal();
+					user.addTotalDaily();
+					user.addTotalWeekly();
+				}
+			}
+			user.addPoints();
+		}
+		user.checkDayVoteStreak(event.isForceBungee());
+
+		if (plugin.getConfigFile().isLimitMonthlyVotes()) {
+			int value = 0;
+			if (event.isBungee()) {
+				value = event.getBungeeTextTotals().getMonthTotal();
+			} else {
+				value = user.getTotal(TopVoter.Monthly);
+			}
+			LocalDateTime cTime = plugin.getTimeChecker().getTime();
+			int days = cTime.getDayOfMonth();
+			plugin.extraDebug("Current day of month: " + days + " Current total: " + value);
+			if (value >= days * plugin.getVoteSiteManager().getVoteSitesEnabled().size()) {
+				plugin.debug("Detected higher month total, changing. Current Total: " + value + " Days: " + days
+						+ " New Total: " + days * plugin.getVoteSiteManager().getVoteSitesEnabled().size());
+				user.setTotal(TopVoter.Monthly, days * plugin.getVoteSiteManager().getVoteSitesEnabled().size());
+			}
+		}
+
+		plugin.getVoteMilestonesManager().handleVote(user, event.getBungeeTextTotals(), event.isForceBungee(), voteUUID,
+				new HashMap<String, String>());
+
+		plugin.getCoolDownCheck().vote(user, voteSite);
+
+		plugin.getVoteStreakHandler().processVote(user, voteTime, voteUUID);
+
+		PlayerPostVoteEvent postVoteEvent = new PlayerPostVoteEvent(voteSite, user, event.isRealVote(),
+				event.isForceBungee(), voteTime, cached, voteSite.getServiceSite(), user.getJavaUUID(), playerName,
+				voteUUID);
+		plugin.getServer().getPluginManager().callEvent(postVoteEvent);
+
+		if (user.isOnline() || plugin.getConfigFile().getPlaceholderCacheLevel().isCacheAlways()) {
+			plugin.getPlaceholders().onUpdate(user, true);
+		}
+
+		if (!user.isOnline()) {
+			user.clearCache();
+		}
+		plugin.setUpdate(true);
+
+		plugin.extraDebug("Finished vote processing: " + playerName + "/" + uuid);
+	}
+
+}
