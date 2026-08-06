@@ -3,6 +3,7 @@ package com.bencodez.votingplugin;
 import java.io.File;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.lang.reflect.Field;
 import java.net.URL;
 import java.security.CodeSource;
 import java.time.Instant;
@@ -14,6 +15,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.UUID;
@@ -26,6 +29,9 @@ import java.util.zip.ZipInputStream;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandMap;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -152,6 +158,8 @@ public class VotingPluginMain extends AdvancedCorePlugin {
 
 	@Getter
 	private CommandLoader commandLoader;
+
+	private PluginCommand registeredVoteCommand;
 
 	@Getter
 	private NameMCLikeCheckerTask nameMCLikeCheckerTask;
@@ -1716,11 +1724,7 @@ public class VotingPluginMain extends AdvancedCorePlugin {
 		commandLoader.loadCommands();
 		commandLoader.loadAliases();
 
-		// /vote, /v
-		getCommand("vote").setExecutor(new CommandVote(this));
-		getCommand("vote").setTabCompleter(new VoteTabCompleter());
-		// getCommand("v").setExecutor(new CommandVote(this));
-		// getCommand("v").setTabCompleter(new VoteTabCompleter());
+		registerVoteCommand();
 
 		// /adminvote, /av
 		getCommand("adminvote").setExecutor(new CommandAdminVote(this));
@@ -1742,6 +1746,90 @@ public class VotingPluginMain extends AdvancedCorePlugin {
 
 		plugin.debug("Loaded Commands");
 
+	}
+
+	/**
+	 * Registers the /vote command respecting VoteCommandEnabled and VoteCommandName config options.
+	 * The command is NOT declared in plugin.yml — it is created and registered entirely
+	 * in code. When disabled, no command exists, giving native "Unknown command" behavior.
+	 */
+	private void registerVoteCommand() {
+		boolean enabled = configFile.isVoteCommandEnabled();
+		String name = configFile.getVoteCommandName();
+
+		if (name == null || name.trim().isEmpty()) {
+			name = "vote";
+		}
+		name = name.trim().toLowerCase(Locale.ROOT);
+
+		if (!enabled) {
+			return;
+		}
+
+		registeredVoteCommand = createPluginCommand(name);
+		if (registeredVoteCommand == null) {
+			getLogger().warning("Failed to create /" + name + " command");
+			return;
+		}
+
+		registeredVoteCommand.setDescription("Vote command");
+		registeredVoteCommand.setExecutor(new CommandVote(this));
+		registeredVoteCommand.setTabCompleter(new VoteTabCompleter());
+
+		CommandMap commandMap = getServerCommandMap();
+		if (commandMap != null) {
+			commandMap.register(getName().toLowerCase(Locale.ROOT), registeredVoteCommand);
+			getLogger().info("Registered /" + name + " command");
+		} else {
+			getLogger().warning("Failed to register /" + name + ": CommandMap unavailable");
+		}
+	}
+
+	/**
+	 * Unregisters the current vote command and re-registers with updated config.
+	 * Called on /av reload so changes to VoteCommandEnabled/VoteCommandName
+	 * take effect without a server restart.
+	 */
+	private void reloadVoteCommand() {
+		if (registeredVoteCommand != null) {
+			CommandMap commandMap = getServerCommandMap();
+			if (commandMap != null) {
+				registeredVoteCommand.unregister(commandMap);
+			}
+			registeredVoteCommand = null;
+		}
+		registerVoteCommand();
+	}
+
+	/**
+	 * Creates a PluginCommand instance. Constructor is protected so we use reflection.
+	 */
+	private PluginCommand createPluginCommand(String name) {
+		try {
+			java.lang.reflect.Constructor<PluginCommand> ctor = PluginCommand.class
+					.getDeclaredConstructor(String.class, org.bukkit.plugin.Plugin.class);
+			ctor.setAccessible(true);
+			return ctor.newInstance(name, this);
+		} catch (Exception e) {
+			getLogger().warning("Failed to create PluginCommand: " + e.getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * Gets the server's CommandMap via reflection.
+	 *
+	 * @return the CommandMap, or null if it cannot be accessed
+	 */
+	private CommandMap getServerCommandMap() {
+		try {
+			Field field = Bukkit.getServer().getClass().getDeclaredField("commandMap");
+			field.setAccessible(true);
+			return (CommandMap) field.get(Bukkit.getServer());
+		} catch (Exception e) {
+			getLogger().warning("Failed to access CommandMap: " + e.getMessage());
+			return null;
+		}
 	}
 
 	/**
@@ -1843,6 +1931,8 @@ public class VotingPluginMain extends AdvancedCorePlugin {
 		coolDownCheck.checkEnabled();
 
 		getVoteStreakHandler().reload();
+
+		reloadVoteCommand();
 
 		loadVoteBroadcast();
 

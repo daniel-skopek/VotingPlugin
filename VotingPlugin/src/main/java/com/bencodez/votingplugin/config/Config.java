@@ -331,6 +331,14 @@ public class Config extends YMLFile {
 	@Getter
 	private boolean disableCoolDownCheck = false;
 
+	@ConfigDataBoolean(path = "VoteCommandEnabled")
+	@Getter
+	private boolean voteCommandEnabled = true;
+
+	@ConfigDataString(path = "VoteCommandName")
+	@Getter
+	private String voteCommandName = "vote";
+
 	@ConfigDataListString(path = "DisabledCommands")
 	@Getter
 	private ArrayList<String> disabledCommands = new ArrayList<>();

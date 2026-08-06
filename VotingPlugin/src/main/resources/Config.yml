@@ -1007,6 +1007,17 @@ DisabledDefaultPermissions: []
 # May not work on some plugins
 UseVaultPermissions: false
 
+# Enable or disable the /vote command completely
+# When disabled, the /vote command and all its sub-commands will not be registered
+# Requires restart
+VoteCommandEnabled: true
+
+# Rename the /vote command to a custom name
+# Requires restart
+# Example: VoteCommandName: hlas
+# This makes /hlas work instead of /vote (the old /vote will be removed)
+VoteCommandName: vote
+
 # List of disabled commands from /vote
 # List the specific permission
 # E.g:

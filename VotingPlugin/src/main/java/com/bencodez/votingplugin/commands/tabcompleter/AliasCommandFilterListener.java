@@ -52,12 +52,6 @@ public class AliasCommandFilterListener implements Listener {
 	 */
 	@EventHandler
 	public void onPlayerCommandSend(PlayerCommandSendEvent event) {
-		// Only hide when aliases feature is disabled
-		if (plugin.getConfigFile().isLoadCommandAliases()) {
-			return;
-		}
-
-		// Remove ONLY exact alias command names (not "vote*" prefixes)
 		event.getCommands().removeIf(this::shouldHideCommand);
 	}
 
@@ -71,18 +65,31 @@ public class AliasCommandFilterListener implements Listener {
 	private boolean shouldHideCommand(String cmd) {
 		String name = cmd.toLowerCase(Locale.ROOT);
 
-		// Never touch namespaced commands (otherplugin:vote)
 		if (name.contains(":")) {
 			return false;
 		}
 
-		// Always keep the primary commands visible
-		if (name.equals("vote") || name.equals("adminvote")) {
+		if (name.equals("adminvote")) {
 			return false;
 		}
 
-		// Hide only exact aliases defined in VotingPlugin plugin.yml
-		return aliasesToHide.contains(name);
+		if (name.equals("vote")) {
+			if (!plugin.getConfigFile().isVoteCommandEnabled()) {
+				return true;
+			}
+			String customName = plugin.getConfigFile().getVoteCommandName();
+			if (customName != null && !customName.trim().isEmpty()
+					&& !"vote".equalsIgnoreCase(customName.trim())) {
+				return true;
+			}
+			return false;
+		}
+
+		if (!plugin.getConfigFile().isLoadCommandAliases()) {
+			return aliasesToHide.contains(name);
+		}
+
+		return false;
 	}
 
 	/**

@@ -24,8 +24,6 @@ loadbefore:
 api-version: 1.13
 folia-supported: true
 commands:
-  vote:
-    description: Vote command
   adminvote:
     description: Admin commands for VotingPlugin
   av:
